@@ -143,6 +143,63 @@ inView != 0 { next }
 # CREATE DATABASE is not supported
 /^(CREATE DATABASE|create database)/ { next }
 
+# Handle ALTER TABLE statements
+/^(ALTER TABLE|alter table)/ {
+  inAlterTable = 1
+  alterStatement = $0
+  alterTableName = ""
+  alterIndexName = ""
+  isAddIndex = 0
+  next
+}
+
+# Continue collecting ALTER TABLE statement lines
+inAlterTable != 0 {
+  alterStatement = alterStatement " " $0
+
+  # Check if this is an ADD INDEX statement (might be on any line)
+  if( /ADD INDEX|add index/ ) {
+    isAddIndex = 1
+    # Extract index name from this line
+    if( match( $0, /(ADD INDEX|add index) `[^`]+/ ) ){
+      indexMatch = substr( $0, RSTART, RLENGTH )
+      if( match( indexMatch, /`[^`]+$/ ) ){
+        alterIndexName = substr( indexMatch, RSTART+1, RLENGTH-1 )
+      }
+    }
+  }
+
+  # Extract table name (might be on any line with backticks)
+  if( alterTableName == "" && match( $0, /`[^`]+/ ) ){
+    alterTableName = substr( $0, RSTART+1, RLENGTH-1 )
+  }
+
+  if( /;$/ ) {
+    # End of ALTER TABLE statement
+    if( isAddIndex && alterTableName != "" && alterIndexName != "" ) {
+      # Extract column list from the entire statement
+      if( match( alterStatement, /\([^)]+\)/ ) ){
+        columnList = substr( alterStatement, RSTART+1, RLENGTH-2 )
+        gsub( /[ \t\n\r]+/, " ", columnList )  # clean whitespace
+        gsub( /^ +| +$/, "", columnList )     # trim leading/trailing spaces
+        gsub( /`/, "\"", columnList )         # convert backticks to double quotes
+
+        # Generate CREATE INDEX statement
+        print "CREATE INDEX \"idx_" alterTableName "_" alterIndexName "\" ON \"" alterTableName "\" (" columnList ");"
+      }
+    }
+    # If it's not an ADD INDEX, we just skip it
+
+    # Reset variables
+    inAlterTable = 0
+    alterStatement = ""
+    alterTableName = ""
+    alterIndexName = ""
+    isAddIndex = 0
+  }
+  next
+}
+
 # print the CREATE line as is and capture the table name
 /^(CREATE|create)/ {
   if( $0 ~ /IF NOT EXISTS|if not exists/ || $0 ~ /TEMPORARY|temporary/ ){
