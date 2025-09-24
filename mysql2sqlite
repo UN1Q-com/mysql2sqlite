@@ -176,6 +176,7 @@ aInc == 1 && /PRIMARY KEY|primary key/ { next }
 /^  / && !/^(  (KEY|key)|\);)/ {
   if( match( $0, /[^"`]AUTO_INCREMENT|auto_increment[^"`]/) ){
     aInc = 1
+    gsub( /PRIMARY KEY/, "" )
     gsub( /AUTO_INCREMENT|auto_increment/, "PRIMARY KEY AUTOINCREMENT" )
   }
   gsub( /(UNIQUE KEY|unique key) (`.*`|".*") /, "UNIQUE " )
