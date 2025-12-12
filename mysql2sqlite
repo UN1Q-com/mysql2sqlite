@@ -229,22 +229,31 @@ aInc == 1 && /PRIMARY KEY|primary key/ { next }
 # Replace COLLATE xxx_xxxx_xx statements with COLLATE BINARY
 / (COLLATE|collate) [a-z0-9_]*/ { gsub( /(COLLATE|collate) [a-z0-9_]*/, "COLLATE BINARY" ) }
 
+# Handle closing paren of multi-line constraints
+/^   *\)/ {
+  if( prev ){
+    if( firstInTable ){
+      print prev
+      firstInTable = 0
+    }
+    else {
+      if( firstInConstraint ){
+        print prev
+        firstInConstraint = 0
+      }
+      else {
+        print "," prev
+      }
+    }
+  }
+  print
+  prev = ""
+  firstInConstraint = 0
+  next
+}
+
 # Print all fields definition lines except the `KEY` lines.
 /^  / && !/^(  (KEY|key)|\);)/ {
-  # If we're already inside a multi-line constraint, just print and continue
-  if( inConstraint ){
-    print
-    # Count parentheses to see if constraint is closed
-    openParens = gsub( /\(/, "(", $0 )
-    closeParens = gsub( /\)/, ")", $0 )
-    constraintParenDepth += (openParens - closeParens)
-    if( constraintParenDepth <= 0 ){
-      inConstraint = 0
-      constraintParenDepth = 0
-    }
-    next
-  }
-
   if( match( $0, /[^"`]AUTO_INCREMENT|auto_increment[^"`]/) ){
     aInc = 1
     gsub( /PRIMARY KEY/, "" )
@@ -283,26 +292,31 @@ aInc == 1 && /PRIMARY KEY|primary key/ { next }
   # Get commas off end of line
   gsub( /,.?$/, "" )
 
-  # Check if this starts a multi-line constraint BEFORE storing in prev
-  openParens = gsub( /\(/, "(", $1 )
-  closeParens = gsub( /\)/, ")", $1 )
-  isMultiLineConstraint = 0
-
-  if( match( $1, /(PRIMARY KEY|primary key|FOREIGN KEY|foreign key|UNIQUE|unique|CHECK|check)/ ) ){
-    if( openParens > closeParens ){
-      isMultiLineConstraint = 1
-      constraintParenDepth = openParens - closeParens
-    }
-  }
-
-  # Handle prev output
   if( prev ){
     if( firstInTable ){
       print prev
       firstInTable = 0
     }
     else {
-      print "," prev
+      # Don't add comma if first item in constraint
+      if( firstInConstraint ){
+        print prev
+        firstInConstraint = 0
+      }
+      else {
+        print "," prev
+      }
+    }
+
+    # Check if what we just printed opens a constraint
+    checkPrev = prev
+    openParens = gsub( /\(/, "(", checkPrev )
+    closeParens = gsub( /\)/, ")", checkPrev )
+
+    if( match( prev, /(PRIMARY KEY|primary key|FOREIGN KEY|foreign key|UNIQUE|unique|CHECK|check)\(/ ) ){
+      if( openParens > closeParens ){
+        firstInConstraint = 1
+      }
     }
   }
   else {
@@ -313,15 +327,7 @@ aInc == 1 && /PRIMARY KEY|primary key/ { next }
     }
   }
 
-  # If this is a multi-line constraint, print it now and mark that we're inside it
-  if( isMultiLineConstraint ){
-    print "," $1
-    inConstraint = 1
-    prev = ""
-  }
-  else {
-    prev = $1
-  }
+  prev = $1
 }
 
 / ENGINE| engine/ {
