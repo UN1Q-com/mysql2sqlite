@@ -229,6 +229,29 @@ aInc == 1 && /PRIMARY KEY|primary key/ { next }
 # Replace COLLATE xxx_xxxx_xx statements with COLLATE BINARY
 / (COLLATE|collate) [a-z0-9_]*/ { gsub( /(COLLATE|collate) [a-z0-9_]*/, "COLLATE BINARY" ) }
 
+# Handle closing paren of multi-line constraints
+/^   *\)/ {
+  if( prev ){
+    if( firstInTable ){
+      print prev
+      firstInTable = 0
+    }
+    else {
+      if( firstInConstraint ){
+        print prev
+        firstInConstraint = 0
+      }
+      else {
+        print "," prev
+      }
+    }
+  }
+  print
+  prev = ""
+  firstInConstraint = 0
+  next
+}
+
 # Print all fields definition lines except the `KEY` lines.
 /^  / && !/^(  (KEY|key)|\);)/ {
   if( match( $0, /[^"`]AUTO_INCREMENT|auto_increment[^"`]/) ){
@@ -268,13 +291,32 @@ aInc == 1 && /PRIMARY KEY|primary key/ { next }
   gsub( / (COMMENT|comment).+$/, "" )
   # Get commas off end of line
   gsub( /,.?$/, "" )
+
   if( prev ){
     if( firstInTable ){
       print prev
       firstInTable = 0
     }
     else {
-      print "," prev
+      # Don't add comma if first item in constraint
+      if( firstInConstraint ){
+        print prev
+        firstInConstraint = 0
+      }
+      else {
+        print "," prev
+      }
+    }
+
+    # Check if what we just printed opens a constraint
+    checkPrev = prev
+    openParens = gsub( /\(/, "(", checkPrev )
+    closeParens = gsub( /\)/, ")", checkPrev )
+
+    if( match( prev, /(PRIMARY KEY|primary key|FOREIGN KEY|foreign key|UNIQUE|unique|CHECK|check)\(/ ) ){
+      if( openParens > closeParens ){
+        firstInConstraint = 1
+      }
     }
   }
   else {
@@ -284,6 +326,7 @@ aInc == 1 && /PRIMARY KEY|primary key/ { next }
       print ","
     }
   }
+
   prev = $1
 }
 
