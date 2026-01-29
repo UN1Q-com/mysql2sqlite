@@ -150,6 +150,51 @@ inView != 0 { next }
   alterTableName = ""
   alterIndexName = ""
   isAddIndex = 0
+  
+  # Check if it's a single-line statement (ends with semicolon)
+  if( /;$/ ) {
+    # Process immediately
+    
+    # Check if this is ADD INDEX or ADD UNIQUE
+    if( /ADD INDEX|add index|ADD UNIQUE|add unique/ ) {
+      isAddIndex = 1
+      
+      # Extract table name
+      if( match( $0, /`[^`]+/ ) ){
+        alterTableName = substr( $0, RSTART+1, RLENGTH-1 )
+      }
+      
+      # Extract index name
+      if( match( $0, /(ADD INDEX|add index|ADD UNIQUE|add unique) `[^`]+/ ) ){
+        indexMatch = substr( $0, RSTART, RLENGTH )
+        if( match( indexMatch, /`[^`]+$/ ) ){
+          alterIndexName = substr( indexMatch, RSTART+1, RLENGTH-1 )
+        }
+      }
+      
+      # Extract column list
+      if( isAddIndex && alterTableName != "" && alterIndexName != "" ) {
+        if( match( alterStatement, /\([^)]+\)/ ) ){
+          columnList = substr( alterStatement, RSTART+1, RLENGTH-2 )
+          gsub( /[ \t\n\r]+/, " ", columnList )
+          gsub( /^ +| +$/, "", columnList )
+          gsub( /`/, "\"", columnList )
+          
+          # Check if UNIQUE
+          uniquePrefix = ""
+          if( alterStatement ~ /ADD UNIQUE|add unique/ ) {
+            uniquePrefix = "UNIQUE "
+          }
+          
+          print "CREATE " uniquePrefix "INDEX \"idx_" alterTableName "_" alterIndexName "\" ON \"" alterTableName "\" (" columnList ");"
+        }
+      }
+    }
+    
+    # Reset
+    inAlterTable = 0
+  }
+  
   next
 }
 
@@ -157,11 +202,11 @@ inView != 0 { next }
 inAlterTable != 0 {
   alterStatement = alterStatement " " $0
 
-  # Check if this is an ADD INDEX statement (might be on any line)
-  if( /ADD INDEX|add index/ ) {
+  # Check if this is an ADD INDEX or ADD UNIQUE statement (might be on any line)
+  if( /ADD INDEX|add index|ADD UNIQUE|add unique/ ) {
     isAddIndex = 1
     # Extract index name from this line
-    if( match( $0, /(ADD INDEX|add index) `[^`]+/ ) ){
+    if( match( $0, /(ADD INDEX|add index|ADD UNIQUE|add unique) `[^`]+/ ) ){
       indexMatch = substr( $0, RSTART, RLENGTH )
       if( match( indexMatch, /`[^`]+$/ ) ){
         alterIndexName = substr( indexMatch, RSTART+1, RLENGTH-1 )
@@ -184,8 +229,14 @@ inAlterTable != 0 {
         gsub( /^ +| +$/, "", columnList )     # trim leading/trailing spaces
         gsub( /`/, "\"", columnList )         # convert backticks to double quotes
 
-        # Generate CREATE INDEX statement
-        print "CREATE INDEX \"idx_" alterTableName "_" alterIndexName "\" ON \"" alterTableName "\" (" columnList ");"
+        # Check if this is a UNIQUE constraint
+        uniquePrefix = ""
+        if( alterStatement ~ /ADD UNIQUE|add unique/ ) {
+          uniquePrefix = "UNIQUE "
+        }
+
+        # Generate CREATE INDEX statement (with UNIQUE if needed)
+        print "CREATE " uniquePrefix "INDEX \"idx_" alterTableName "_" alterIndexName "\" ON \"" alterTableName "\" (" columnList ");"
       }
     }
     # If it's not an ADD INDEX, we just skip it
